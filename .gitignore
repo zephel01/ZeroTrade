@@ -1,0 +1,34 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 実行時の生成物
+state/
+logs/
+*.db
+*.sqlite3
+*.log
+
+.DS_Store
+
+# Cowork からの受け渡し用一時ディレクトリ（中身を確認したら削除してよい）
+_to_delete/
+
+# ヒストリカルデータ（12MB超）。スクリプトで再取得できるので履歴に入れない。
+#   python3 scripts/fetch_bitstamp.py
+#   python3 scripts/fetch_bingx_public.py SOL-USDT 1000PEPE-USDT TAO-USDT
+# **先頭の / は必須。** これが無いと src/zerotrade/data/ まで除外される。
+/data/

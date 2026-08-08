@@ -1,0 +1,103 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zerotrade"
+version = "0.1.0"
+description = "ルール徹底とリスク管理を強制する自動売買ベースシステム"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Hideki Yamamoto" }]
+keywords = ["trading", "fx", "algotrading", "risk-management"]
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Office/Business :: Financial :: Investment",
+]
+
+dependencies = [
+  "pydantic>=2.6",
+  "PyYAML>=6.0",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+ui = ["textual>=0.79"]
+ccxt = ["ccxt>=4.4"]
+analysis = ["pandas>=2.0", "numpy>=1.26"]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "respx>=0.21",
+  # lint と型チェックは**バージョンを固定する**。
+  # 下限だけの指定（ruff>=0.6 など）にしていたら、CI が勝手に新しい版を入れ、
+  # 無関係な変更のはずのコミットで落ちた。実際 ruff 0.15→0.16 で
+  # Markdown 内の Python コードまで整形対象になり、CI だけが赤くなった。
+  # 上げるときは意図して上げ、そのコミットで差分を確認する。
+  "ruff==0.16.2",
+  "mypy==2.3.0",
+  "textual>=0.79",
+  "ccxt>=4.4",
+  "types-PyYAML",
+  "pre-commit>=3.7",
+]
+
+[project.scripts]
+zerotrade = "zerotrade.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zerotrade"]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # isort
+  "B",        # flake8-bugbear
+  "UP",       # pyupgrade
+  "SIM",      # flake8-simplify
+  "RUF",      # ruff specific
+  "ASYNC",    # flake8-async
+  "C4",       # comprehensions
+  "TID",      # tidy imports
+]
+ignore = [
+  "RUF001",  # 全角文字を含む文字列（日本語コメント/メッセージを許可）
+  "RUF002",
+  "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B018"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["zerotrade", "tests"]
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+strict = true
+warn_unreachable = true
+disallow_untyped_decorators = false
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# ccxt は py.typed を提供していない。境界で Any を受けて自前で正規化する。
+module = ["respx.*", "ccxt.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers"
+filterwarnings = ["error"]

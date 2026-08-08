@@ -1,0 +1,73 @@
+# OANDA（FX）用設定。
+#
+# 事前に環境変数を設定すること:
+#   export OANDA_ACCOUNT_ID="101-xxx-xxxxxxx-xxx"
+#   export OANDA_API_TOKEN="..."
+#
+# 認証情報が無い場合は fallback_to_paper により PaperBroker で起動する
+# （mode: live では設定バリデータが paper を禁止するため発動しない）。
+#
+#   zerotrade -c config/oanda.yaml check
+#   zerotrade -c config/oanda.yaml run
+
+mode: paper                    # 実弾を入れる準備ができたら live へ
+symbols:
+  - USD_JPY
+poll_interval_seconds: 60      # M5足なので毎分で十分
+state_dir: state
+
+broker:
+  name: oanda
+  environment: practice        # practice / live
+  account_id: ${OANDA_ACCOUNT_ID}
+  api_token: ${OANDA_API_TOKEN}
+  timeout_seconds: 10
+  account_currency: JPY
+  fallback_to_paper: true      # 本番運用では false を推奨
+
+risk:
+  max_risk_per_trade: 0.005    # 実弾は控えめに 0.5%
+  max_daily_loss: 0.02
+  max_weekly_loss: 0.05
+  max_margin_usage: 0.20
+  max_open_positions: 2
+  max_positions_per_symbol: 1
+  max_daily_trades: 10
+  require_stop_loss: true
+  atr_spike_multiplier: 2.5
+  assumed_leverage: 25
+  reset_timezone: Asia/Tokyo
+  cooldown_seconds_after_loss: 1800   # 損切り後30分は同じ銘柄を触らない
+  max_spread: 0.05                    # 5銭を超えたら発注しない
+
+sizing:
+  method: fixed_fractional
+  min_quantity: 1000
+  quantity_step: 1000
+  max_quantity: 100000
+  contract_size: 1
+
+strategy:
+  name: sma_rsi
+  params:
+    fast_period: 20
+    slow_period: 50
+    atr_period: 14
+    atr_stop_multiplier: 2
+    atr_target_multiplier: 3
+
+notifications:
+  console: true
+  webhook_url: ${DISCORD_WEBHOOK_URL}
+  webhook_kind: discord
+  min_level: info
+
+store:
+  enabled: true
+  equity_interval_seconds: 60
+  record_signals: true
+
+logging:
+  level: INFO
+  json: true
+  file: logs/zerotrade.log

@@ -1,0 +1,99 @@
+# BingX（ccxt 経由）用の設定。
+#
+#   pip install "zerotrade[ccxt]"
+#   export BINGX_API_KEY="..."
+#   export BINGX_API_SECRET="..."
+#
+# ── 安全に始める順番 ─────────────────────────────────────
+#   1. 取引権限を外した読み取り専用キーで `check`
+#        zerotrade -c config/bingx.yaml check --connect
+#   2. VST（デモ）で発注まで一周させる
+#        environment: practice のまま
+#        zerotrade -c config/bingx.yaml run --iterations 50
+#   3. 別ターミナルで監視
+#        zerotrade -c config/bingx.yaml dashboard
+#   4. 問題なければ environment: live へ。出金権限は絶対に付けないこと
+# ────────────────────────────────────────────────────
+#
+# BingX 固有の注意:
+#   * 建玉照会は銘柄リストが必須。symbols に書いたものだけが見える
+#   * 接続時に片方向モード（positionSide=BOTH）へ寄せる。
+#     ヘッジモードのままだと決済注文が反対側の新規建てになる
+#   * clientOrderId は2時間しか照会できない（注文追跡は取引所IDを使う）
+#   * fetchPositionsHistory があるため確定損益は実測で取れる
+
+mode: paper                    # 実弾を入れる準備ができたら live へ
+symbols:
+  - BTC_USDT                   # 建玉照会に必要。触る銘柄はすべてここに書く
+poll_interval_seconds: 15
+state_dir: state
+
+broker:
+  name: bingx
+  environment: practice        # practice = VST（デモ）/ live = 本番
+  market_type: swap            # 永続契約。現物なら spot
+  margin_mode: cross           # cross / isolated
+  api_token: ${BINGX_API_KEY}
+  api_secret: ${BINGX_API_SECRET}
+  timeout_seconds: 30
+  account_currency: USDT
+  fallback_to_paper: true      # 本番運用では false を推奨
+  # バックテストと PaperBroker が使うスプレッド（価格単位＝USDT）。
+  # **本番の板で実測した値を入れること。**
+  # VST（デモ）は本番よりスプレッドが極端に広い。BTC/USDT で実測すると
+  # VST 2.2 に対し本番 0.2 と11倍の開きがあった。VSTの値を使うと
+  # 実際より不利な条件で判定してしまう。板情報は認証不要で取れる。
+  # 銘柄ごとの実測値は docs/symbols.md にある。
+  spread: 0.2
+
+risk:
+  # 仮想通貨はドル円よりボラティリティが1桁大きい。FXと同じ設定は危険。
+  max_risk_per_trade: 0.005    # 1トレード 0.5%
+  max_daily_loss: 0.02
+  max_weekly_loss: 0.05
+  max_margin_usage: 0.20
+  max_open_positions: 2
+  max_positions_per_symbol: 1
+  max_daily_trades: 10
+  require_stop_loss: true
+  atr_spike_multiplier: 3.0
+  assumed_leverage: 3          # 高レバレッジは推奨しない
+  # 24時間365日動くため日次境界は便宜的なもの。取引所の集計に合わせて UTC。
+  reset_timezone: UTC
+  cooldown_seconds_after_loss: 3600
+
+sizing:
+  method: fixed_fractional
+  # 実際の刻みと最小数量は load_markets から取得して自動で丸める。
+  # ここは下限としての保険。
+  min_quantity: 0.0001
+  quantity_step: 0.0001
+  contract_size: 1
+
+strategy:
+  name: donchian
+  # 戦略が見る足種。**バックテストで使ったCSVの足種と必ず揃えること。**
+  # ここが既定(M5)のままだと、H1で検証した結果は何の保証にもならない。
+  granularity: H1
+  params:
+    entry_period: 20
+    exit_period: 10
+    trend_period: 100
+    atr_period: 14
+    atr_stop_multiplier: 3
+    atr_trail_multiplier: 3
+
+notifications:
+  console: true
+  webhook_url: ${DISCORD_WEBHOOK_URL}
+  webhook_kind: discord
+  min_level: info
+
+store:
+  enabled: true
+  equity_interval_seconds: 60
+
+logging:
+  level: INFO
+  json: false
+  file: logs/bingx.log

@@ -1,0 +1,67 @@
+# ペーパートレード用設定。
+# APIキーが無くてもそのまま動く（PaperBroker が疑似価格を生成する）。
+#
+#   zerotrade -c config/paper.yaml check
+#   zerotrade -c config/paper.yaml run --iterations 200
+
+mode: paper
+symbols:
+  - USD_JPY
+poll_interval_seconds: 0.1   # PaperBrokerは1ループで足を1本進めるだけなので短くてよい
+state_dir: state
+
+broker:
+  name: paper
+  initial_balance: 1000000     # 100万円
+  account_currency: JPY
+  spread: 0.003                # 0.3銭。実際のブローカーの実勢に合わせること
+  fallback_to_paper: true
+
+risk:
+  max_risk_per_trade: 0.01     # 1トレード = 口座の1%
+  max_daily_loss: 0.03         # 日次 -3% で自動停止
+  max_weekly_loss: 0.06        # 週次 -6% で自動停止
+  max_margin_usage: 0.30       # 証拠金使用率 30% まで
+  max_open_positions: 3
+  max_positions_per_symbol: 1
+  max_daily_trades: 20
+  require_stop_loss: true      # ストップ無しの新規は禁止
+  atr_spike_multiplier: 3.0    # ATRが平常時の3倍を超えたら新規停止
+  assumed_leverage: 25
+  reset_timezone: Asia/Tokyo   # 日次カウンタは日本時間でリセット
+  cooldown_seconds_after_loss: 0
+
+sizing:
+  method: fixed_fractional
+  min_quantity: 1000           # FXの最小取引単位
+  quantity_step: 1000
+  contract_size: 1
+
+strategy:
+  name: sma_rsi
+  params:
+    fast_period: 20
+    slow_period: 50
+    rsi_period: 14
+    rsi_overbought: 70
+    rsi_oversold: 30
+    atr_period: 14
+    atr_stop_multiplier: 2
+    atr_target_multiplier: 3
+    allow_short: true
+
+notifications:
+  console: true
+  # webhook_url: ${DISCORD_WEBHOOK_URL}
+  # webhook_kind: discord
+  min_level: info
+
+store:
+  enabled: true                # SQLite記録層。dashboard と report はこれを読む
+  # path: state/zerotrade.db   # 既定は state_dir/zerotrade.db
+  equity_interval_seconds: 5   # ペーパーは足が速いので短め（実運用は60秒程度）
+  record_signals: true
+
+logging:
+  level: INFO
+  json: false

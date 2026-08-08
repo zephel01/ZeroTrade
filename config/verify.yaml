@@ -1,0 +1,84 @@
+# 発注経路の検証（配管テスト）専用の設定。
+#
+# ── この設定は本物の注文を出す ─────────────────────────────
+# `zerotrade -c config/verify.yaml verify` を実行したときだけ、
+# BingX の本番環境へ最小数量の注文が飛ぶ。BTC 0.0001 枚（約6〜7ドル相当）で、
+# 往復コストはスプレッド0.03bpと手数料を合わせて数セントに収まる。
+#
+# 他のサブコマンド（check / report など）は発注しない。
+# `verify --dry-run` を付ければ読み取りだけで済む。
+# ────────────────────────────────────────────────────
+#
+# 何を確かめるためのものか:
+#   ZeroTrade の発注経路はモックとペーパーブローカーでしか通っていない。
+#   テストが通るのは「自分が書いた偽物が期待どおり応答する」からであって、
+#   取引所が実際に何を受け取り何を返すかは別の話である。
+#   過去に reduce_only の取り違え・シンボル解決の誤り・足の取得上限など、
+#   いずれもモックでは見つからない食い違いが実際に起きている。
+#
+#   数ドルで、その未知を潰す。
+#
+# 実行前の確認:
+#   1. BingX の現物または先物口座に USDT が10ドル程度あること
+#   2. APIキーに**出金権限が付いていない**こと
+#   3. 対象銘柄に既存の建玉が無いこと（あると検証にならない）
+
+mode: live                     # 本番発注なので live。これが無いと起動時に拒否される
+symbols:
+  - BTC_USDT                   # 板が厚くスプレッドが最小（0.03bp）。配管確認に最適
+poll_interval_seconds: 15
+state_dir: state/verify        # 本番・検証の記録と混ぜない
+
+broker:
+  name: bingx
+  environment: live            # **本番。実際の資金が動く**
+  market_type: swap
+  margin_mode: cross
+  api_token: ${BINGX_API_KEY}
+  api_secret: ${BINGX_API_SECRET}
+  timeout_seconds: 30
+  account_currency: USDT
+  fallback_to_paper: false     # 認証が読めなければ起動時に落とす
+
+risk:
+  # 配管テストは最小数量を直接指定するため、リスク上限はほぼ効かない。
+  # それでも事故の保険として絞っておく。
+  max_risk_per_trade: 0.01
+  max_daily_loss: 0.02
+  max_weekly_loss: 0.05
+  max_margin_usage: 0.10
+  max_open_positions: 1
+  max_positions_per_symbol: 1
+  max_daily_trades: 5
+  require_stop_loss: true
+  atr_spike_multiplier: 3.0
+  assumed_leverage: 3
+  reset_timezone: UTC
+
+sizing:
+  method: fixed_fractional
+  min_quantity: 0.0001         # BingX の BTC-USDT 最小数量
+  quantity_step: 0.0001
+  contract_size: 1
+
+strategy:
+  # 配管テストでは戦略を動かさない（verify は戦略を経由しない）。
+  # 設定の検証を通すためだけに置いてある。
+  name: donchian
+  granularity: H1
+  params:
+    entry_period: 20
+    exit_period: 10
+
+notifications:
+  console: true
+  min_level: info
+
+store:
+  enabled: true
+  equity_interval_seconds: 300
+
+logging:
+  level: INFO
+  json: false
+  file: logs/verify.log

@@ -1,0 +1,81 @@
+# 仮想通貨取引所（ccxt 経由）用の設定。
+#
+# 事前に環境変数を設定すること:
+#   export CCXT_API_KEY="..."
+#   export CCXT_API_SECRET="..."
+#   export CCXT_API_PASSPHRASE="..."   # OKX など一部の取引所のみ
+#
+#   pip install "zerotrade[ccxt]"
+#   zerotrade -c config/ccxt.yaml check
+#   zerotrade -c config/ccxt.yaml run --iterations 50
+#
+# ── 安全に始める順番 ────────────────────────────────
+#   1. 取引権限を外した読み取り専用キーで `check` を通す
+#   2. environment: practice（テストネット）で `run` を回す
+#   3. それでも問題なければ本番へ。出金権限は絶対に付けないこと
+# ────────────────────────────────────────────────
+
+mode: paper                    # 実弾を入れる準備ができたら live へ
+symbols:
+  - BTC_USDT
+poll_interval_seconds: 10
+state_dir: state
+
+broker:
+  name: ccxt
+  exchange: binance            # bybit / okx / bitflyer など ccxt の取引所ID
+  environment: practice        # practice = テストネット / live = 本番
+  market_type: swap            # spot / swap / future
+  api_token: ${CCXT_API_KEY}
+  api_secret: ${CCXT_API_SECRET}
+  api_passphrase: ${CCXT_API_PASSPHRASE}
+  timeout_seconds: 30
+  account_currency: USDT
+  fallback_to_paper: true      # 本番運用では false を推奨
+
+risk:
+  # 仮想通貨はドル円よりボラティリティが1桁大きい。
+  # 同じ 1% リスクでも建玉は小さくなるが、上限そのものも絞る。
+  max_risk_per_trade: 0.005
+  max_daily_loss: 0.02
+  max_weekly_loss: 0.05
+  max_margin_usage: 0.20
+  max_open_positions: 2
+  max_positions_per_symbol: 1
+  max_daily_trades: 10
+  require_stop_loss: true
+  atr_spike_multiplier: 3.0
+  assumed_leverage: 3          # 仮想通貨で高レバレッジは推奨しない
+  # 24時間365日動くため日次境界は便宜的なもの。UTC を基準にする。
+  reset_timezone: UTC
+  cooldown_seconds_after_loss: 3600
+
+sizing:
+  method: fixed_fractional
+  # 刻みと最小数量は取引所から取得して自動で丸めるが、
+  # 下限としてここにも入れておく。
+  min_quantity: 0.001
+  quantity_step: 0.001
+  contract_size: 1
+
+strategy:
+  name: donchian
+  params:
+    entry_period: 20
+    exit_period: 10
+    atr_stop_multiplier: 3
+    atr_trail_multiplier: 3
+
+notifications:
+  console: true
+  webhook_url: ${DISCORD_WEBHOOK_URL}
+  webhook_kind: discord
+  min_level: info
+
+store:
+  enabled: true
+  equity_interval_seconds: 60
+
+logging:
+  level: INFO
+  json: false

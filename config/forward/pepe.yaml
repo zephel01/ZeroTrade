@@ -1,0 +1,79 @@
+# 前向き検証（シャドー実行）— 1000PEPE_USDT
+#
+# **発注は外へ出ない。** 本番の実勢価格を読み、約定は手元で模擬する。
+# 判定基準と事前登録は docs/forward-test.md にある。開始後に触らないこと。
+#
+# 6銘柄を**別プロセス・別口座**で回す。1口座に混ぜると資金が共有され、
+# ある銘柄の損益が別の銘柄のポジションサイズを動かしてしまう。
+# バックテストは1銘柄ずつ行ったので、条件を揃えるために分ける。
+#
+#   scripts/forward_start.sh     # 6本まとめて起動
+#   scripts/forward_status.sh    # 生存確認
+#   python3 scripts/forward_judge.py   # 合計トレード数と暫定成績
+
+mode: paper
+symbols:
+  - 1000PEPE_USDT
+poll_interval_seconds: 60
+state_dir: state/forward/pepe
+
+broker:
+  name: shadow                 # 実勢価格で読み、約定は手元で模擬
+  upstream: bingx
+  environment: live            # 本番の板を読む。発注はしないので実弾は動かない
+  market_type: swap
+  margin_mode: cross
+  api_token: ${BINGX_API_KEY}
+  api_secret: ${BINGX_API_SECRET}
+  timeout_seconds: 30
+  account_currency: USDT
+  fallback_to_paper: false
+  initial_balance: 1000000
+  # 本番板の実測値（docs/symbols.md）。約定は上流の実勢気配値で行うため
+  # 実行時には使われないが、バックテストと条件を揃えるために置く。
+  spread: 0.0000013
+
+risk:
+  # バックテスト時と同じ設定にする。ここを変えると比較にならない。
+  max_risk_per_trade: 0.005
+  max_daily_loss: 0.02
+  max_weekly_loss: 0.05
+  max_margin_usage: 0.20
+  max_open_positions: 1
+  max_positions_per_symbol: 1
+  max_daily_trades: 10
+  require_stop_loss: true
+  atr_spike_multiplier: 3.0
+  assumed_leverage: 3
+  reset_timezone: UTC
+  cooldown_seconds_after_loss: 3600
+
+sizing:
+  method: fixed_fractional
+  min_quantity: 699      # BingX の最小数量
+  quantity_step: 1
+  contract_size: 1
+
+strategy:
+  name: donchian
+  granularity: H1              # **検証したのは1時間足**
+  params:
+    entry_period: 20
+    exit_period: 10
+    trend_period: 100
+    atr_period: 14
+    atr_stop_multiplier: 3
+    atr_trail_multiplier: 3
+
+notifications:
+  console: true
+  min_level: warning           # 6本動くので通常ログは絞る
+
+store:
+  enabled: true
+  equity_interval_seconds: 300
+
+logging:
+  level: INFO
+  json: false
+  file: logs/forward-pepe.log
