@@ -21,14 +21,18 @@ from zerotrade.backtest.engine import (
     split_candles,
 )
 from zerotrade.backtest.optimize import OptimizationResult, ParameterGrid, optimize
+from zerotrade.backtest.robustness import RobustnessReport, bootstrap, required_trades
 
 __all__ = [
     "BacktestResult",
     "OptimizationResult",
     "ParameterGrid",
+    "RobustnessReport",
     "SimulationClock",
+    "bootstrap",
     "default_database",
     "optimize",
+    "required_trades",
     "run_backtest",
     "split_candles",
 ]

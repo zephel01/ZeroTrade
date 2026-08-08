@@ -16,6 +16,7 @@
 * ``import``     外部で入手した OHLCV を取り込み、足種を揃える
 * ``backtest``   ヒストリカルデータ上で戦略を検証する
 * ``optimize``   パラメータを掃引し、in/out-of-sample を並べて表示する
+* ``robustness`` 記録済みのトレードを引き直し、成績が運と区別できるか検定する
 """
 
 from __future__ import annotations
@@ -164,6 +165,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME=VALUE",
         help="戦略パラメータを上書きする（複数指定可）",
     )
+    backtest_cmd.add_argument(
+        "--robustness",
+        action="store_true",
+        help="結果をブートストラップに掛け、運と区別がつくかまで見る",
+    )
 
     optimize_cmd = sub.add_parser("optimize", help="パラメータを掃引する")
     optimize_cmd.add_argument(
@@ -184,6 +190,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--split", type=float, default=0.7, help="in-sample に使う割合（既定 0.7）"
     )
     optimize_cmd.add_argument("--top", type=int, default=5, help="検証する上位件数")
+
+    robustness_cmd = sub.add_parser(
+        "robustness",
+        help="記録済みのトレードを引き直して「この成績は運か」を検定する",
+    )
+    robustness_cmd.add_argument(
+        "--db",
+        type=Path,
+        default=None,
+        help="対象のDB（既定: 設定の記録層）。backtest が表示するパスを渡せる",
+    )
+    robustness_cmd.add_argument(
+        "--iterations", type=int, default=2_000, help="引き直しの回数（既定 2000）"
+    )
+    robustness_cmd.add_argument("--seed", type=int, default=20260808, help="乱数の種")
+    robustness_cmd.add_argument(
+        "--days", type=int, default=None, help="直近この日数だけを対象にする"
+    )
 
     return parser
 
@@ -392,6 +416,42 @@ def _report(settings: Settings, output: Path | None, days: int | None) -> int:
     return 0
 
 
+def _robustness(
+    settings: Settings,
+    db_path: Path | None,
+    iterations: int,
+    seed: int,
+    days: int | None,
+) -> int:
+    """記録済みのトレードを引き直して、成績が運と区別できるかを見る。"""
+    from datetime import timedelta
+
+    from zerotrade.backtest.robustness import bootstrap
+    from zerotrade.models import utcnow
+    from zerotrade.store import Store
+
+    path = db_path or settings.database_path
+    if not path.is_file():
+        print(f"記録がまだありません（{path}）。", file=sys.stderr)
+        return 1
+
+    since = utcnow() - timedelta(days=days) if days else None
+    with Store.open_for_read(path) as store:
+        trades = store.trades(limit=1_000_000, since=since)
+        quality = store.execution_quality(since=since)
+
+    if len(trades) < 2:
+        print(f"トレードが {len(trades)} 件しかありません。検定は2件以上から。", file=sys.stderr)
+        return 1
+
+    # 古い順に戻す。並びはどのみち引き直しで壊れるが、観測値の最大DDは順序で決まる。
+    pnls = [t.realized_pnl for t in reversed(trades)]
+    print(bootstrap(pnls, iterations=iterations, seed=seed).describe())
+    print(quality.describe())
+    print(f"記録: {path}")
+    return 0
+
+
 def _stop(settings: Settings, reason: str) -> int:
     from zerotrade.control import KillSwitch
 
@@ -487,6 +547,7 @@ async def _backtest(
     symbols: list[str] | None,
     report_path: Path | None,
     params: list[str],
+    robustness: bool = False,
 ) -> int:
     from zerotrade.backtest import default_database, run_backtest
     from zerotrade.backtest.optimize import parse_param_spec
@@ -509,6 +570,21 @@ async def _backtest(
         print("却下の内訳:")
         for rule, count in sorted(result.rejections.items(), key=lambda kv: -kv[1]):
             print(f"  {rule}: {count}")
+
+    from zerotrade.store import summarize_execution
+
+    quality = summarize_execution([], result.trades)
+    if quality.trades_with_excursion:
+        print(quality.describe())
+
+    if robustness:
+        from zerotrade.backtest.robustness import bootstrap
+
+        try:
+            print(bootstrap([t.realized_pnl for t in result.trades]).describe())
+        except ValueError as exc:
+            print(f"検定は実施しませんでした: {exc}")
+
     print(f"記録: {database}")
 
     if report_path is not None:
@@ -706,7 +782,11 @@ def main(argv: list[str] | None = None) -> int:
                 _verify(settings, args.symbol, args.quantity, args.dry_run, args.yes)
             )
         if args.command == "backtest":
-            return asyncio.run(_backtest(settings, args.csv, args.symbol, args.report, args.param))
+            return asyncio.run(
+                _backtest(settings, args.csv, args.symbol, args.report, args.param, args.robustness)
+            )
+        if args.command == "robustness":
+            return _robustness(settings, args.db, args.iterations, args.seed, args.days)
         if args.command == "optimize":
             return asyncio.run(
                 _optimize(settings, args.csv, args.symbol, args.param, args.split, args.top)
