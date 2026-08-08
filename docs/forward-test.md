@@ -183,16 +183,16 @@ zerotrade -c config/forward/pepe.yaml report -o state/forward/pepe/report.html
 
 マシンの再起動、スリープ復帰の失敗、`nohup` プロセスの終了。90日あれば必ず起きる。
 
-**建玉と残高はファイルに保存してあるので、再起動しても引き継がれる**（`state/pepe-forward/shadow_state.json`）。約定のたびに保存し、書き込み途中で落ちても壊れたファイルが残らないよう一時ファイル経由で置き換えている。
+**建玉と残高はファイルに保存してあるので、再起動しても引き継がれる**（`state/forward/<銘柄>/shadow_state.json`）。約定のたびに保存し、書き込み途中で落ちても壊れたファイルが残らないよう一時ファイル経由で置き換えている。
 
 保存していなかった場合に何が起きるかを書いておくと、**再起動のたびに保有中の建玉が消える**。しかも消えるのは「そのとき持っていた取引」なので、**長く持っている取引ほど失われる**。トレンドフォローは大きく勝つ取引ほど長く持つため、成績を系統的に過小評価することになる。判定を歪める側のバイアスなので、ここは潰しておく必要があった。
 
 ### 生きているかの確認
 
 ```bash
-ps aux | grep "pepe-forward" | grep -v grep     # プロセスの生存
-tail -20 logs/pepe-forward.out                   # 直近のログ
-zerotrade -c config/pepe-forward.yaml status     # リスク状態
+scripts/forward_status.sh              # 6本の生存確認
+python3 scripts/forward_watch.py       # 建玉・確定損益・件数
+tail -20 logs/forward-pepe.out         # 個別のログ
 ```
 
 落ちていたら、同じコマンドで再開してよい。**再開は検証のやり直しにはならない**（状態を引き継ぐため）。ただし止まっていた期間に出たシグナルは取り逃がすので、長く止めるほど取引数が減る。
@@ -200,7 +200,7 @@ zerotrade -c config/pepe-forward.yaml status     # リスク状態
 ### 意図的に止めるとき
 
 ```bash
-zerotrade -c config/pepe-forward.yaml stop     # 緊急停止を要求
+zerotrade -c config/forward/pepe.yaml stop     # 銘柄ごとに緊急停止を要求
 ```
 
 ## 途中経過を見るときの注意

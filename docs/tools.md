@@ -17,9 +17,9 @@ zerotrade --help
 zerotrade -c config/paper.yaml <サブコマンド>
 ```
 
-同梱の設定は5つある。`config/paper.yaml` はペーパートレード用でAPIキー不要、`config/oanda.yaml` はOANDA接続用、`config/ccxt.yaml` は仮想通貨取引所の汎用接続用、`config/bingx.yaml` は BingX 用、`config/pepe-forward.yaml` は前向き検証用（シャドー実行）。いずれも環境変数から認証情報を読む。
+同梱の設定はこうなっている。`config/paper.yaml` はペーパートレード用でAPIキー不要、`config/bingx.yaml` は BingX 用、`config/ccxt.yaml` は仮想通貨取引所の汎用接続用、`config/verify.yaml` は配管テスト用、`config/forward/*.yaml` は前向き検証用（シャドー実行）。`config/oanda.yaml` も残してあるが未検証である。認証情報はいずれも環境変数から読む。
 
-秘密情報は YAML に直接書かず `${OANDA_API_TOKEN}` の形で環境変数を参照する。`.env.example` を `.env` にコピーして使うとよい（`.env` は `.gitignore` 済み）。
+秘密情報は YAML に直接書かず `${BINGX_API_KEY}` の形で環境変数を参照する。`.env.example` を `.env` にコピーして使うとよい（`.env` は `.gitignore` 済み）。
 
 ---
 
@@ -139,7 +139,7 @@ ccxt の統一APIは `BaseBroker` とほぼ1対1で対応するため、1つの�
 
 ### なぜこれを入れたか
 
-**ライブ発注の経路を実物のAPIで検証できるようになる**のが最大の理由である。OANDA アダプタはモックでしか検証できておらず、口座条件（本番口座・プロコース・残高25万円）で塞がっている。仮想通貨取引所のAPIキーは無料で即時に発行でき、多くはテストネットも持つ。`environment: practice` を指定すると `set_sandbox_mode` が有効になり、**入金ゼロで発注から決済までを一周させられる**。
+**ライブ発注の経路を実物のAPIで検証できるようになる**のが最大の理由である。仮想通貨取引所のAPIキーは無料で即時に発行でき、多くはテストネットも持つ。`environment: practice` を指定すると `set_sandbox_mode` が有効になり、**入金ゼロで発注から決済までを一周させられる**。
 
 ### 安全に始める順番
 
@@ -206,7 +206,7 @@ zerotrade -c config/bingx.yaml check --connect
 
 ### VST（デモ環境）について
 
-`environment: practice` を指定すると `set_sandbox_mode` が有効になり、エンドポイントが `open-api-vst.bingx.com` に向く。BingX の VST は **Virtual Simulated Trading** で、**入金ゼロで発注から決済までを一周させられる**。OANDA のデモ口座と違って API が使えるので、ライブ発注の経路をここで実物のAPIに対して検証できる。
+`environment: practice` を指定すると `set_sandbox_mode` が有効になり、エンドポイントが `open-api-vst.bingx.com` に向く。BingX の VST は **Virtual Simulated Trading** で、**入金ゼロで発注から決済までを一周させられる**。ライブ発注の経路をここで実物のAPIに対して検証できる。
 
 ### 銘柄の書き方
 
@@ -264,7 +264,7 @@ USD/JPY での実測では、スプレッドを 0.3銭 から 2銭 に変えた�
 ## 前向き検証（シャドー実行）
 
 ```bash
-zerotrade -c config/pepe-forward.yaml run
+scripts/forward_start.sh
 ```
 
 `broker.name: shadow` は、**本番の実勢価格を読みながら、約定だけ手元で模擬する**ブローカーである。前向き検証のための器で、`broker.upstream` に価格の取得元を書く。
@@ -406,7 +406,7 @@ notifications:
 
 ### `broker.spread`
 
-**実際に使うブローカーの実勢に合わせること。** 短期戦略ではこの値が成績を支配する。実測では同じ戦略・同じデータで 0.3銭なら -8%、2銭なら -48% と6倍の差が出た。既定は 0.3銭（OANDA証券の USD/JPY 実勢）。
+**実際に使うブローカーの実勢に合わせること。** 短期戦略ではこの値が成績を支配する。実測では同じ戦略・同じデータで 0.3銭なら -8%、2銭なら -48% と6倍の差が出た。既定は 0.3銭（USD/JPY の一般的な実勢）。銘柄ごとの実測値は [symbols.md](symbols.md) にある。
 
 ### `mode` — 実弾を止める最後の設定
 
@@ -500,13 +500,10 @@ state/
 `pip install "zerotrade[ui]"` で textual を入れる。
 
 **`limit: This field must be less than or equal to 1440` と出る**
-足の取得本数が取引所の上限を超えている。`fetch` はブローカーが申告する上限（`max_ohlcv_count`）に合わせて自動でページ幅を縮めるので、通常は起きない。新しい取引所を足すときは、この属性を実際の上限に設定すること（BingX 1440 / OANDA 5000 / ccxt の既定 1000）。
+足の取得本数が取引所の上限を超えている。`fetch` はブローカーが申告する上限（`max_ohlcv_count`）に合わせて自動でページ幅を縮めるので、通常は起きない。新しい取引所を足すときは、この属性を実際の上限に設定すること（BingX は 1440、ccxt の既定は 1000）。
 
 **バックテストの足数が想定より少ない**
 `import` は埋まりきっていない最後の足を捨てる。未確定の足を残すと、実際には存在しなかった高値安値でストップ判定が動くため。
-
-**OANDA に繋がらない**
-デモ口座では REST API を使えない。本番口座（NYサーバーのプロコース）・会員ステータス Gold・口座残高25万円以上が条件。API が使えるまでは `import` で外部データを取り込んで検証を進められる。
 
 ---
 

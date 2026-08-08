@@ -73,14 +73,13 @@ Yahoo は足種ごとに遡れる上限がある（1分足=7日 / 5分足=60日 
 もっとも品質が高い。実際に発注する相手のデータで検証できる。
 
 ```bash
-export OANDA_ACCOUNT_ID="101-xxx-xxxxxxx-xxx"
-export OANDA_API_TOKEN="..."
+export BINGX_API_KEY="..."
+export BINGX_API_SECRET="..."
 zerotrade -c config/oanda.yaml fetch --symbol USD_JPY --granularity M5 --days 365
 ```
 
-1リクエストの上限（OANDA v20 なら5000本）は自動で分割して遡る。
+1リクエストの上限（BingX なら1440本）は自動で分割して遡る。ブローカーが申告する上限に合わせるので、呼ぶ側は意識しなくてよい。
 
-> OANDA証券の REST API はデモ口座では使えない。本番口座（NYサーバーのプロコース）・会員ステータス Gold・口座残高25万円以上が条件になっている。
 
 ---
 

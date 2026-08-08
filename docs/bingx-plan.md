@@ -100,8 +100,8 @@ BingX の画面で建玉がゼロになっていることを目視で確認す�
 ## [C] 前向き検証（90日・発注なし）
 
 ```bash
-nohup zerotrade -c config/pepe-forward.yaml run > logs/pepe-forward.out 2>&1 &
-zerotrade -c config/pepe-forward.yaml dashboard    # 別ターミナル
+scripts/forward_start.sh                  # 6銘柄まとめて起動
+python3 scripts/forward_watch.py          # 現況（別ターミナル）
 ```
 
 シャドー実行なので**注文は外へ出ない**。VST の残高がゼロでも動く。[A][B] と同時に走らせて構わない。
@@ -118,7 +118,7 @@ zerotrade -c config/pepe-forward.yaml dashboard    # 別ターミナル
 ### 途中で見てよいもの
 
 ```bash
-zerotrade -c config/pepe-forward.yaml report -o state/pepe-forward/report.html
+python3 scripts/forward_judge.py          # 進捗と、規定件数到達後の判定
 ```
 
 見るのは構わないが、**見て何かを変えたら検証は終わる**。勝っているのを見て安心するのも、負けているのを見て早く止めたくなるのも、どちらも判定を歪める。
