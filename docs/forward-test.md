@@ -200,8 +200,26 @@ tail -20 logs/forward-pepe.out         # 個別のログ
 ### 意図的に止めるとき
 
 ```bash
-zerotrade -c config/forward/pepe.yaml stop     # 銘柄ごとに緊急停止を要求
+scripts/forward_stop.sh                            # 6本まとめて
+scripts/forward_stop.sh forward "PC再起動のため"     # 理由を記録に残す
+zerotrade -c config/forward/pepe.yaml stop         # 銘柄ごとに
 ```
+
+各プロセスの `state_dir` に `STOP` を置き、**次のループ境界で取引ループ自身に止まってもらう**。未約定注文の取消とリスク状態の保存を済ませてから終了する。`poll_interval_seconds: 60` なので最大1分ほどかかる。`forward_stop.sh` は全部止まるまで待って結果を出す。
+
+**`kill -9` は使わないこと。** リスク状態の保存を飛ばすので、再開時に日次・週次のカウンタが古い値から始まる。どうしても残る場合は `SIGTERM` を送る。これも次のループ境界まで待ってから安全に閉じる。
+
+```bash
+pkill -TERM -f 'config/forward/.*\.yaml run'
+```
+
+再開は `scripts/forward_start.sh`。`STOP` は起動時に自動で消える。**建玉・残高・トレード件数はすべて引き継がれる**ので、再開しても検証のやり直しにはならない。
+
+ただし**止めていた期間の相場は永久に欠測**になる。そこで出たはずのシグナルは埋めようがない。1日以上止めたときは下に書き足すこと。後から都合よく解釈しないための記録である。
+
+**停止した記録:**
+
+- （まだ無し）
 
 ## 途中経過を見るときの注意
 

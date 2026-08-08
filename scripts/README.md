@@ -8,6 +8,7 @@
 |-----------|------|
 | `forward_start.sh` | 前向き検証をまとめて起動（引数: グループ名、既定 `forward`） |
 | `forward_status.sh` | プロセスの生存確認 |
+| `forward_stop.sh` | 前向き検証をまとめて止める（**強制終了はしない**・引数: グループ名、停止理由） |
 | `forward_watch.py` | 建玉・確定損益・件数を1画面で表示（`--group` / `--watch`） |
 | `forward_judge.py` | 進捗と、規定件数到達後の合否判定（`--group`） |
 | `fetch_bingx_public.py` | BingX 公開APIから1時間足を取得（認証不要・銘柄を引数で指定） |
@@ -22,6 +23,7 @@
 scripts/forward_start.sh
 python3 scripts/forward_watch.py
 python3 scripts/forward_judge.py
+scripts/forward_stop.sh                 # 止める（再開は forward_start.sh）
 
 # データ取得（data/ は git 管理外なので、必要になったら取り直す）
 python3 scripts/fetch_bingx_public.py SOL-USDT 1000PEPE-USDT TAO-USDT
@@ -31,6 +33,11 @@ python3 scripts/fetch_bitstamp.py
 python3 scripts/survey_symbols.py
 python3 scripts/hypothesis_weekend.py
 ```
+
+`forward_stop.sh` はキルスイッチを置くだけで、**プロセスを強制終了しない**。取引ループが次の境界で
+自分から止まり、未約定注文の取消とリスク状態の保存を済ませる。`poll_interval_seconds: 60` なので
+最大1分ほどかかる。建玉は閉じない（意図的）。詳しくは
+[../docs/tools.md の「止める・再開する」](../docs/tools.md#止める再開する)。
 
 `hypothesis_*.py` は [../docs/hypotheses.md](../docs/hypotheses.md) の事前登録に対応する。
 **外れた仮説も含めて再現できる形で残してある。**
