@@ -9,7 +9,7 @@
 [![CI](https://github.com/zephel01/ZeroTrade/actions/workflows/ci.yml/badge.svg)](https://github.com/zephel01/ZeroTrade/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](#ライセンス)
-[![Tests](https://img.shields.io/badge/tests-433%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-468%20passed-brightgreen.svg)](tests/)
 [![Typed: strict](https://img.shields.io/badge/mypy-strict-informational.svg)](pyproject.toml)
 
 [クイックスタート](#クイックスタート) ·
@@ -91,6 +91,8 @@ zerotrade -c config/bingx.yaml check --connect   # 疎通・残高・気配値�
 | **リスク強制** | 11種のルールを RiskManager が強制。却下理由は機械可読な名前で返る |
 | **バックテスト** | ライブと**同じ** StrategyRunner / RiskManager / OrderManager を通す |
 | **過学習対策** | `optimize` が in-sample と out-of-sample を分けて自動で答え合わせ |
+| **ロバストネス検定** | `robustness` がトレードを引き直し、**その成績が運かどうか**を返す |
+| **約定品質** | 滑りの実測（bp）と MFE/MAE。仮定したコストが実測に負けていないか見る |
 | **シャドー実行** | 本番の実勢価格で読み、約定だけ手元で模擬。**発注は外へ出ない** |
 | **配管テスト** | `verify` が最小数量で発注経路を実物のAPIに対して検証する |
 | **監視** | TUI ダッシュボードと自己完結HTMLレポート。取引プロセスとは別プロセス |
@@ -103,11 +105,22 @@ zerotrade -c config/bingx.yaml check --connect   # 疎通・残高・気配値�
 **このプロジェクトで一番時間を使ったのは、戦略を作ることではなく「自分を騙さない手順」を固めることだった。**
 
 ```
-0. 仮説を書く      →  1. バックテスト  →  2. 事前登録  →  3. 前向き検証  →  4. 実弾
-   （データを見る前）    （前半/後半に分割）   （基準を確定）    （未見データ）    （最小額）
+0. 仮説を書く      →  1. バックテスト  →  2. 運かどうか  →  3. 事前登録  →  4. 前向き検証  →  5. 実弾
+   （データを見る前）    （前半/後半に分割）   （引き直して検定）  （基準を確定）    （未見データ）     （最小額）
 ```
 
 各段階に「ここで落ちたら次へ進まない」関門がある。**落ちるのは失敗ではない。落ちずに実弾まで行くほうが危ない。**
+
+段階2の実例。BTC/USDT 1時間足で +4.24% という成績が出たが、`robustness` に掛けるとこうなる。
+
+```
+最終損益: 観測 +424 / 5% -2,297 / 中央 +277 / 95% +3,248
+資金を減らして終わる確率: 43.0%
+この優位性を偶然と区別するのに必要な件数: 約 14,870件（現在 247件）
+判定: 5パーセンタイルがマイナス側。運と区別がついていない
+```
+
+**プラスで終わっていることと、優位性があることは別。** 5パーセンタイルがプラス側にない成績を「勝てる戦略」と呼ばない、という基準ひとつで前へ進めるかを決めている。
 
 <details>
 <summary><b>なぜこの手順なのか</b></summary>
@@ -120,7 +133,7 @@ zerotrade -c config/bingx.yaml check --connect   # 疎通・残高・気配値�
 
 **未見データで確かめる。** 過去データの分割は、どれだけ丁寧に分けても既に存在するデータの中の話である。今日から先のデータだけが本当の検定期間になる。
 
-詳細は [docs/strategies.md の「採用までの道のり」](docs/strategies.md#書いたあと--採用までの道のり) と [docs/backtesting.md の「自分を騙さないための7項目」](docs/backtesting.md#自分を騙さないための7項目)。
+詳細は [docs/strategies.md の「採用までの道のり」](docs/strategies.md#書いたあと--採用までの道のり) と [docs/backtesting.md の「自分を騙さないための8項目」](docs/backtesting.md#自分を騙さないための8項目)。
 
 </details>
 
@@ -258,7 +271,7 @@ CI は Python 3.11 / 3.12 で lint・型チェック・テストを回す。**ru
 |-------------|------|
 | [tools.md](docs/tools.md) | コマンド・スクリプト一覧、設定、運用、トラブルシューティング |
 | [strategies.md](docs/strategies.md) | 同梱戦略、新しい戦略の書き方、**採用までの道のり** |
-| [backtesting.md](docs/backtesting.md) | 検証の進め方と、**自分を騙さないための7項目** |
+| [backtesting.md](docs/backtesting.md) | 検証の進め方と、**自分を騙さないための8項目** |
 | [hypotheses.md](docs/hypotheses.md) | **仮説の事前登録と結果**（外れたものも全部） |
 | [forward-test.md](docs/forward-test.md) | 実施中の前向き検証と判定基準 |
 | [symbols.md](docs/symbols.md) | 銘柄ごとの実測スプレッド・最小数量・検証結果 |
