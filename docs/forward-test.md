@@ -151,11 +151,22 @@ export BINGX_API_KEY="..." BINGX_API_SECRET="..."
 # 1. 6銘柄まとめて起動（発注は外へ出ない）
 scripts/forward_start.sh
 
-# 2. 生存確認
+# 2. 現況をまとめて見る（建玉・確定損益・件数を1画面で）
+python3 scripts/forward_watch.py
+python3 scripts/forward_watch.py --watch    # 10秒ごとに更新
+
+# 3. 生存確認だけでよければ
 scripts/forward_status.sh
 
-# 3. 進捗と判定
+# 4. 判定（60件到達後）
 python3 scripts/forward_judge.py
+```
+
+銘柄ごとに詳しく見たいときは、通常のコマンドに設定を渡せばよい。
+
+```bash
+zerotrade -c config/forward/pepe.yaml dashboard
+zerotrade -c config/forward/pepe.yaml report -o state/forward/pepe/report.html
 ```
 
 `forward_start.sh` は既に動いているものを再起動しない。**二重起動すると同じ記録DBを2プロセスが書き、トレードが重複して数えられる**ため。

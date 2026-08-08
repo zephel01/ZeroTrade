@@ -46,6 +46,61 @@ zerotrade -c config/paper.yaml <サブコマンド>
 
 ---
 
+## スクリプト一覧
+
+`zerotrade` コマンドに載せるほど汎用でない作業は `scripts/` に置いてある。**いずれも発注しない。**
+
+| スクリプト | 用途 | 引数 |
+|-----------|------|------|
+| `forward_start.sh` | 前向き検証をまとめて起動 | グループ名（既定 `forward`） |
+| `forward_status.sh` | プロセスの生存確認 | グループ名（既定 `forward`） |
+| `forward_watch.py` | 建玉・確定損益・件数を1画面で表示 | `--group` / `--watch` |
+| `forward_judge.py` | 進捗と、規定件数到達後の合否判定 | `--group` |
+| `fetch_bingx_public.py` | BingX 公開APIから1時間足を取得（認証不要） | 銘柄（`SOL-USDT` など・複数可） |
+| `fetch_bitstamp.py` | Bitstamp から BTC/USD を2017年以降取得 | なし |
+| `survey_symbols.py` | 複数銘柄を前半/後半に分けて横並び検証 | なし |
+| `hypothesis_weekend.py` | H1 週末効果の検定（プラセボ付き） | なし |
+| `hypothesis_funding.py` | H2 ファンディング時刻の検定 | なし |
+| `hypothesis_monthend.py` | H3 月末リバランスの検定 | なし |
+
+### 前向き検証を回す
+
+```bash
+scripts/forward_start.sh                       # config/forward/*.yaml を起動
+python3 scripts/forward_watch.py               # 現況（建玉・損益・件数）
+python3 scripts/forward_watch.py --watch       # 10秒ごとに更新
+python3 scripts/forward_judge.py               # 進捗と判定
+scripts/forward_status.sh                      # 生存確認だけでよいとき
+```
+
+判定は規定件数に達するまで成績の詳細を出さない。日々の観察と最終判定を分けてあるのは、**途中経過を見て基準を動かさないため**である。
+
+### データを取る
+
+```bash
+python3 scripts/fetch_bingx_public.py SOL-USDT 1000PEPE-USDT TAO-USDT
+python3 scripts/fetch_bitstamp.py
+```
+
+`zerotrade fetch` との違いは**認証が要らない**点である。`fetch` は設定のブローカー経由なのでAPIキーとその環境設定に従うが、こちらは公開エンドポイントだけを叩く。**検証用のデータ取得はこちらが適切**で、テストネットのスプレッドに影響されない本番の値が取れる。
+
+`fetch_bitstamp.py` は2017年まで遡れる。取引所も商品性も違う独立系統なので、「片方の取引所の癖」を切り分けるのに使う。
+
+### 検証する
+
+```bash
+python3 scripts/survey_symbols.py        # 6銘柄を前半/後半で横並び
+python3 scripts/hypothesis_weekend.py    # H1（プラセボと並べて出る）
+python3 scripts/hypothesis_funding.py    # H2
+python3 scripts/hypothesis_monthend.py   # H3
+```
+
+`hypothesis_*.py` は [hypotheses.md](hypotheses.md) の事前登録に対応する。**結果を再現できる形で残してある**ので、同じ手順で自分でも確かめられる。データは先に `fetch_*.py` で `data/` に用意しておくこと。
+
+`data/` は git 管理外である（12MB超で、スクリプトから再取得できるため）。
+
+---
+
 ## まず動かす
 
 ```bash
@@ -269,6 +324,21 @@ BTC/USDT なら 0.0001 枚（約6〜7ドル相当）の往復で、コストは�
 ### 安全装置
 
 途中で失敗しても**最後に必ず決済を試みる**。決済できなかった場合は合格と報告せず、「建玉が残っています」と明示して終了コード1で落ちる。ストップは買値の80%に置き、検証中に引っかからないようにしてある。
+
+### 複数の検証を並行して回す
+
+前向き検証はグループ単位で動く。別の戦略を検証したくなったら `config/<group>/` を作り、スクリプトに渡す。
+
+```bash
+scripts/forward_start.sh forward2
+scripts/forward_status.sh forward2
+python3 scripts/forward_watch.py --group forward2
+python3 scripts/forward_judge.py --group forward2
+```
+
+**稼働中の検証に新しい戦略を混ぜてはいけない。** 集計の意味が変わり、それまで集めた件数が無駄になる。`state_dir` も必ず分けること。
+
+シャドー実行なので何本並行させても発注は外へ出ない。
 
 ## 監視する
 

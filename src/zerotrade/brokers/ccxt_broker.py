@@ -462,10 +462,13 @@ class CcxtBroker(BaseBroker):
 
         # 対応していれば約定と同時にストップが入る。無視されても
         # StrategyRunner の強制決済が最後の砦として働く。
+        ccxt_symbol = self._to_ccxt(request.symbol)
         if request.stop_loss is not None:
-            params["stopLoss"] = {"triggerPrice": float(request.stop_loss)}
+            params["stopLoss"] = {"triggerPrice": self._round_price(ccxt_symbol, request.stop_loss)}
         if request.take_profit is not None:
-            params["takeProfit"] = {"triggerPrice": float(request.take_profit)}
+            params["takeProfit"] = {
+                "triggerPrice": self._round_price(ccxt_symbol, request.take_profit)
+            }
         return params
 
     def _to_ccxt(self, symbol: str) -> str:
@@ -547,6 +550,24 @@ class CcxtBroker(BaseBroker):
     def _to_zerotrade(symbol: str) -> str:
         """ccxt の ``BTC/USDT:USDT`` を ``BTC_USDT`` へ。"""
         return symbol.split(":")[0].replace("/", "_")
+
+    def _round_price(self, ccxt_symbol: str, price: Decimal) -> float:
+        """取引所の刻みに合わせて価格を丸める。
+
+        ストップは ATR から計算するため ``64692.01652383044993090602514`` のような
+        端数が付く。取引所は価格の刻み（tick size）を持っており、刻みに合わない
+        価格は**丸められるか、拒否される**。どちらになるかは取引所次第なので、
+        こちらで揃えてから送る。
+
+        丸めの方向は取引所任せでよい。ストップの位置が1ティック動いても
+        リスク量はほとんど変わらない（数量の丸めと違い、上振れが危険側に
+        効かない）ため。
+        """
+        try:
+            return float(self._exchange.price_to_precision(ccxt_symbol, float(price)))
+        except Exception as exc:
+            logger.debug("価格の丸めに失敗しました（そのまま送ります）: %s", exc)
+            return float(price)
 
     def _round_amount(self, ccxt_symbol: str, quantity: Decimal) -> Decimal:
         """取引所の刻みに合わせて数量を丸める（切り捨て）。

@@ -147,6 +147,15 @@ src/zerotrade/
 └── backtest/
     ├── engine.py      # 本番と同じ経路を早送りする
     └── optimize.py    # パラメータ掃引（in/out-of-sample 分割つき）
+
+scripts/               # 汎用でない作業（いずれも発注しない）
+├── forward_start.sh   # 前向き検証をまとめて起動
+├── forward_status.sh  # 生存確認
+├── forward_watch.py   # 建玉・損益・件数を1画面で表示
+├── forward_judge.py   # 進捗と合否判定
+├── fetch_*.py         # 検証用データの取得（認証不要）
+├── survey_symbols.py  # 複数銘柄の横並び検証
+└── hypothesis_*.py    # 事前登録した仮説の検定（再現用）
 ```
 
 金額・数量・価格はすべて `Decimal` で扱う。float の丸め誤差が「口座の1%」という制約に混入するのを避けるためで、float を使うのは指標計算の内部だけに限定している。

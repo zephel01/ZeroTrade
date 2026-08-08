@@ -73,7 +73,16 @@
 
 取引所も商品性も違う2系統を用意した。片方だけに出る現象は、その取引所の癖である可能性が高い。Bitstamp は 2017年まで遡れるので、強気相場（2017、2020-21、2023-24）と弱気相場（2018、2022、2025-26）の両方を含む。
 
-再現手順は `scripts/fetch_bitstamp.py` でデータを取り、`scripts/hypothesis_*.py` を実行する。
+再現手順は次のとおり。**外れた仮説も含めて、そのまま確かめられる形で残してある。**
+
+```bash
+python3 scripts/fetch_bitstamp.py                        # 2017年以降のBTC/USD
+python3 scripts/fetch_bingx_public.py BTC-USDT           # BingX 本番の1時間足
+
+python3 scripts/hypothesis_weekend.py                    # H1
+python3 scripts/hypothesis_funding.py                    # H2
+python3 scripts/hypothesis_monthend.py                   # H3
+```
 
 ## H1: 週末効果 — 不採用
 

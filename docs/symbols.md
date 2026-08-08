@@ -2,7 +2,13 @@
 
 SOL / 1000PEPE / TAO / GOLD / WTI を BTC と同じ手順で調べた記録。**採用したものは無い。**
 
-調査日: 2026-08-08。データは BingX の**本番**公開API（`scripts/fetch_bingx_public.py`、認証不要）。
+調査日: 2026-08-08。データは BingX の**本番**公開API（認証不要）。
+
+```bash
+python3 scripts/fetch_bingx_public.py SOL-USDT 1000PEPE-USDT TAO-USDT \
+    NCCOGOLD2USD-USDT NCCO1OILWTI2USD-USDT
+python3 scripts/survey_symbols.py     # 下の表を再現する
+```
 
 ---
 

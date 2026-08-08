@@ -588,3 +588,39 @@ async def test_条件注文のトリガー価格を読み取れる(
 async def test_トリガー価格が無ければNone(broker: CcxtBroker) -> None:
     orders = await broker.get_open_orders("BTC_USDT")
     assert orders[0].stop_price is None
+
+
+async def test_ストップ価格は取引所の刻みに丸められる(
+    broker: CcxtBroker, exchange: FakeExchange
+) -> None:
+    """ATR から計算したストップは端数だらけになる。
+
+    実際に 64692.01652383044993090602514 のような値が出た。
+    刻みに合わない価格は取引所に丸められるか拒否されるので、先に揃える。
+    """
+    exchange.price_to_precision = lambda symbol, price: f"{price:.2f}"  # type: ignore[attr-defined]
+
+    await broker.place_order(
+        OrderRequest(
+            symbol="BTC_USDT",
+            side=Side.BUY,
+            quantity=Decimal("0.01"),
+            stop_loss=Decimal("64692.01652383044993090602514"),
+        )
+    )
+    params = exchange.calls[-1][1][5]
+    assert params["stopLoss"]["triggerPrice"] == 64692.02
+
+
+async def test_丸めに失敗してもそのまま送る(broker: CcxtBroker, exchange: FakeExchange) -> None:
+    """price_to_precision を持たない取引所でも発注できること。"""
+    await broker.place_order(
+        OrderRequest(
+            symbol="BTC_USDT",
+            side=Side.BUY,
+            quantity=Decimal("0.01"),
+            stop_loss=Decimal("58000.5"),
+        )
+    )
+    params = exchange.calls[-1][1][5]
+    assert params["stopLoss"]["triggerPrice"] == 58000.5

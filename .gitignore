@@ -30,5 +30,5 @@ _to_delete/
 # ヒストリカルデータ（12MB超）。スクリプトで再取得できるので履歴に入れない。
 #   python3 scripts/fetch_bitstamp.py
 #   python3 scripts/fetch_bingx_public.py SOL-USDT 1000PEPE-USDT TAO-USDT
-# **先頭の / は必須。** これが無いと src/zerotrade/data/ まで除外される。
+# **先頭の / は必須。** 無いと src/zerotrade/data/ まで除外される。
 /data/

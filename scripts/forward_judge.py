@@ -12,11 +12,13 @@
 それは記述であって判定ではない。銘柄別の数字を見て「PEPEだけは良かった」と
 言い出した時点で、また同じ罠に落ちる。
 
-    python3 scripts/forward_judge.py
+    python3 scripts/forward_judge.py                    # config/forward/
+    python3 scripts/forward_judge.py --group forward2   # 別の検証グループ
 """
 
 from __future__ import annotations
 
+import argparse
 import statistics
 import sys
 from decimal import Decimal
@@ -85,9 +87,15 @@ def _fmt(value: object) -> str:
 
 
 def main() -> int:
-    state_dir = Path("state/forward")
+    parser = argparse.ArgumentParser(description="前向き検証の進捗と判定")
+    parser.add_argument(
+        "--group", default="forward", help="検証グループ名（state/<group>/ を読む）"
+    )
+    args = parser.parse_args()
+
+    state_dir = Path("state") / args.group
     if not state_dir.is_dir():
-        print("まだ記録がありません。scripts/forward_start.sh で開始してください。")
+        print(f"まだ記録がありません。scripts/forward_start.sh {args.group} で開始してください。")
         return 1
 
     by_symbol = _load(state_dir)
