@@ -28,6 +28,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from zerotrade.brokers.base import BaseBroker
+from zerotrade.core.excursion import ExcursionTracker
 from zerotrade.data.historical import synthetic_candles
 from zerotrade.errors import BrokerError, InsufficientFundsError, OrderRejected
 from zerotrade.log import get_logger
@@ -104,6 +105,8 @@ class PaperBroker(BaseBroker):
         self._positions: dict[str, Position] = {}
         self._orders: dict[str, Order] = {}
         self._closed_trades: list[ClosedTrade] = []
+        # 足の高値・安値で MFE/MAE を測る。気配値の標本より正確になる。
+        self._excursions = ExcursionTracker(contract_size)
         self._connected = False
         self._id_counter = itertools.count(1)
 
@@ -275,6 +278,7 @@ class PaperBroker(BaseBroker):
             stop_loss=request.stop_loss,
             take_profit=request.take_profit,
             reduce_only=request.reduce_only,
+            reference_price=request.reference_price,
             metadata=dict(request.metadata),
             created_at=self.simulated_time,
             updated_at=self.simulated_time,
@@ -324,7 +328,15 @@ class PaperBroker(BaseBroker):
         self._cursor[symbol] += 1
         candle = series[self._cursor[symbol] - 1]
         self._process_pending_orders(symbol, candle)
+        # 決済判定より前に測る。ストップに掛かった足の逆行も MAE に含めたい。
+        self._track_excursion(symbol, candle)
         self._process_exits(symbol, candle)
+
+    def _track_excursion(self, symbol: str, candle: Candle) -> None:
+        """この足の高値・安値で建玉の含み損益の振れ幅を更新する。"""
+        position = self._positions.get(symbol)
+        if position is not None:
+            self._excursions.observe_range(position, candle.high, candle.low)
 
     def _process_pending_orders(self, symbol: str, candle: Candle) -> None:
         """指値・逆指値がこの足の値幅に触れていれば約定させる。"""
@@ -450,6 +462,13 @@ class PaperBroker(BaseBroker):
         pnl = (price - position.entry_price) * position.side.sign * quantity * self._contract_size
         self._cash += pnl
 
+        # 部分決済では、建玉全体で測った振れ幅を決済した割合で按分する。
+        ratio = quantity / position.quantity if position.quantity > 0 else Decimal(1)
+        excursion = self._excursions.snapshot(symbol, ratio=ratio)
+        # 決済価格そのものが最大値を更新していることがある（ストップ・利確）。
+        if excursion is not None:
+            excursion = excursion.extended(pnl, pnl)
+
         self._closed_trades.append(
             ClosedTrade(
                 symbol=symbol,
@@ -462,6 +481,8 @@ class PaperBroker(BaseBroker):
                 closed_at=self.simulated_time,
                 trade_id=position.broker_position_id or symbol,
                 reason=reason,
+                mfe=None if excursion is None else excursion.favorable,
+                mae=None if excursion is None else excursion.adverse,
             )
         )
         logger.info(
@@ -489,6 +510,7 @@ class PaperBroker(BaseBroker):
             )
         else:
             del self._positions[symbol]
+            self._excursions.forget(symbol)
 
     def _close_position(self, symbol: str, price: Decimal, *, reason: str) -> None:
         position = self._positions.get(symbol)

@@ -22,6 +22,7 @@ from zerotrade.store import Store
 from zerotrade.store.models import (
     EquityPoint,
     EventRow,
+    ExecutionQuality,
     PerformanceSummary,
     RejectionRow,
     TradeRow,
@@ -168,6 +169,36 @@ def _summary_tiles(summary: PerformanceSummary, currency: str) -> str:
     return f'<div class="tiles">{"".join(tiles)}</div>'
 
 
+def _quality_tiles(quality: ExecutionQuality, currency: str) -> str:
+    """約定品質。**優位性と同じ単位（bp）で並べる。**
+
+    バックテストはコストを仮定で置いている。その仮定が実測に負けていないかは、
+    成績そのものより先に見るべき数字になる。
+    """
+    if quality.fills == 0 and quality.trades_with_excursion == 0:
+        return (
+            '<p class="empty">約定品質の記録がまだありません'
+            "（想定価格を残した注文が約定すると貯まります）。</p>"
+        )
+
+    capture = quality.average_capture_ratio
+    tiles = [
+        _tile("滑り 平均", f"{quality.average_slippage_bp:+.2f} bp"),
+        _tile(
+            "滑り 最悪",
+            f"{quality.worst_slippage_bp:+.2f} bp",
+            tone="loss" if quality.worst_slippage_bp > 0 else "",
+        ),
+        _tile("約定件数", str(quality.fills)),
+        _tile("MFE 平均", f"{_money(quality.average_mfe)} {currency}"),
+        _tile("MAE 平均", f"{_money(quality.average_mae)} {currency}"),
+        _tile("取り切り率", "—" if capture is None else f"{capture:.0%}"),
+        _tile("勝ちの平均MAE", f"{_money(quality.winners_average_mae)} {currency}"),
+        _tile("MFE/MAE 記録数", str(quality.trades_with_excursion)),
+    ]
+    return f'<div class="tiles">{"".join(tiles)}</div>'
+
+
 def _trades_table(trades: Sequence[TradeRow]) -> str:
     if not trades:
         return '<p class="empty">まだ決済されたトレードがありません。</p>'
@@ -253,6 +284,7 @@ def render_report(
     rejection_counts: dict[str, int],
     rejections: Sequence[RejectionRow],
     events: Sequence[EventRow],
+    quality: ExecutionQuality | None = None,
     currency: str = "JPY",
     period_label: str = "全期間",
     generated_at: datetime | None = None,
@@ -279,6 +311,9 @@ def render_report(
 
 <h2>equity 推移</h2>
 {_equity_svg(equity)}
+
+<h2>約定品質</h2>
+{_quality_tiles(quality or ExecutionQuality(), currency)}
 
 <h2>トレード履歴</h2>
 {_trades_table(trades)}
@@ -328,6 +363,7 @@ def build_report(
         rejection_counts=store.rejection_counts(since=since),
         rejections=store.rejections(limit=1),
         events=store.events(limit=30),
+        quality=store.execution_quality(since=since),
         currency=currency,
         period_label=label,
     )

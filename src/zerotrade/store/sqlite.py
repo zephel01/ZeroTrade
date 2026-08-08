@@ -39,13 +39,15 @@ from zerotrade.models import (
 from zerotrade.store.models import (
     EquityPoint,
     EventRow,
+    ExecutionQuality,
     PerformanceSummary,
     RejectionRow,
     SignalRow,
+    SlippageRow,
     TradeRow,
 )
 
-__all__ = ["Store"]
+__all__ = ["Store", "summarize", "summarize_execution"]
 
 logger = get_logger(__name__)
 
@@ -62,7 +64,9 @@ CREATE TABLE IF NOT EXISTS trades (
     opened_at     TEXT    NOT NULL,
     closed_at     TEXT    NOT NULL,
     reason        TEXT    NOT NULL DEFAULT '',
-    strategy      TEXT    NOT NULL DEFAULT ''
+    strategy      TEXT    NOT NULL DEFAULT '',
+    mfe           TEXT,
+    mae           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_trades_closed_at ON trades(closed_at);
 
@@ -76,6 +80,7 @@ CREATE TABLE IF NOT EXISTS orders (
     status          TEXT NOT NULL,
     filled_quantity TEXT NOT NULL DEFAULT '0',
     average_price   TEXT,
+    reference_price TEXT,
     stop_loss       TEXT,
     take_profit     TEXT,
     strategy        TEXT NOT NULL DEFAULT '',
@@ -127,6 +132,14 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
 """
 
+#: 後から足した列。既存のDBは ``CREATE TABLE IF NOT EXISTS`` では更新されないので、
+#: 開くたびに不足ぶんだけ ALTER する。稼働中のDBを作り直さずに済ませるため。
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("trades", "mfe", "TEXT"),
+    ("trades", "mae", "TEXT"),
+    ("orders", "reference_price", "TEXT"),
+)
+
 
 def _dec(value: Any, default: Decimal = Decimal(0)) -> Decimal:
     if value is None:
@@ -150,6 +163,18 @@ def _time(value: Any) -> datetime:
 
 def _str(value: Decimal | None) -> str | None:
     return None if value is None else str(value)
+
+
+def _column(row: sqlite3.Row, name: str) -> Any:
+    """読み取り専用で開いた古いDBには無い列を、欠損として扱う。
+
+    読み取り時は ALTER を掛けられない（他プロセスが書いている最中かもしれない）。
+    列が無いこと自体は障害ではないので、静かに ``None`` を返す。
+    """
+    try:
+        return row[name]
+    except (IndexError, KeyError):
+        return None
 
 
 class Store:
@@ -183,6 +208,20 @@ class Store:
 
         if not read_only:
             self._conn.executescript(_SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """既存DBに後から足した列を追加する。
+
+        列を消したり型を変えたりはしない。記録層の互換性を壊すと、
+        走っている検証の履歴がその時点で読めなくなる。
+        """
+        for table, column, kind in _ADDED_COLUMNS:
+            existing = {row["name"] for row in self._query(f"PRAGMA table_info({table})")}
+            if not existing or column in existing:
+                continue
+            self._execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+            logger.info("記録層に列を追加しました: %s.%s", table, column)
 
     # ------------------------------------------------------------ ライフサイクル
 
@@ -239,12 +278,13 @@ class Store:
         """発注を記録する。同じ client_order_id は最新状態で上書きする。"""
         self._execute(
             "INSERT INTO orders (client_order_id, broker_order_id, symbol, side, quantity,"
-            " order_type, status, filled_quantity, average_price, stop_loss, take_profit,"
-            " strategy, reason, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " order_type, status, filled_quantity, average_price, reference_price, stop_loss,"
+            " take_profit, strategy, reason, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(client_order_id) DO UPDATE SET"
             " broker_order_id=excluded.broker_order_id, status=excluded.status,"
             " filled_quantity=excluded.filled_quantity, average_price=excluded.average_price,"
+            " reference_price=excluded.reference_price,"
             " updated_at=excluded.updated_at",
             (
                 order.client_order_id,
@@ -256,6 +296,7 @@ class Store:
                 str(order.status),
                 str(order.filled_quantity),
                 _str(order.average_price),
+                _str(order.reference_price),
                 _str(order.stop_loss),
                 _str(order.take_profit),
                 str(order.metadata.get("strategy", "")),
@@ -294,8 +335,8 @@ class Store:
         )
         self._execute(
             "INSERT OR IGNORE INTO trades (dedup_key, symbol, side, quantity, entry_price,"
-            " exit_price, realized_pnl, opened_at, closed_at, reason, strategy)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " exit_price, realized_pnl, opened_at, closed_at, reason, strategy, mfe, mae)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 dedup_key,
                 trade.symbol,
@@ -308,6 +349,8 @@ class Store:
                 trade.closed_at.isoformat(),
                 trade.reason,
                 "",
+                _str(trade.mfe),
+                _str(trade.mae),
             ),
         )
 
@@ -363,6 +406,8 @@ class Store:
                 closed_at=_time(row["closed_at"]),
                 reason=row["reason"],
                 strategy=row["strategy"],
+                mfe=_opt_dec(_column(row, "mfe")),
+                mae=_opt_dec(_column(row, "mae")),
             )
             for row in self._query(sql, params)
         ]
@@ -451,6 +496,50 @@ class Store:
             for row in self._query("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,))
         ]
 
+    # ------------------------------------------------------------ 約定品質
+
+    def slippage(self, *, since: datetime | None = None) -> list[SlippageRow]:
+        """約定した注文の、想定価格と実約定価格の差。
+
+        想定価格を残していない注文（古い記録や、外から同期した注文）は
+        含めない。無いものを0として混ぜると平均が良く見えてしまう。
+        """
+        sql = (
+            "SELECT symbol, side, average_price, reference_price, created_at FROM orders"
+            " WHERE average_price IS NOT NULL AND reference_price IS NOT NULL"
+        )
+        params: list[Any] = []
+        if since is not None:
+            sql += " AND created_at >= ?"
+            params.append(since.isoformat())
+        sql += " ORDER BY created_at DESC"
+
+        rows: list[SlippageRow] = []
+        for row in self._query(sql, params):
+            reference = _dec(row["reference_price"])
+            if reference <= 0:
+                continue
+            sign = Decimal(1) if str(row["side"]).endswith("buy") else Decimal(-1)
+            slipped = (_dec(row["average_price"]) - reference) * sign
+            rows.append(
+                SlippageRow(
+                    symbol=row["symbol"],
+                    side=row["side"],
+                    reference_price=reference,
+                    average_price=_dec(row["average_price"]),
+                    slippage=slipped,
+                    slippage_bp=slipped / reference * Decimal(10_000),
+                    created_at=_time(row["created_at"]),
+                )
+            )
+        return rows
+
+    def execution_quality(self, *, since: datetime | None = None) -> ExecutionQuality:
+        """滑りと MFE/MAE をまとめた約定品質のサマリ。"""
+        return summarize_execution(
+            self.slippage(since=since), self.trades(limit=1_000_000, since=since)
+        )
+
     # ------------------------------------------------------------ 集計
 
     def performance(self, *, since: datetime | None = None) -> PerformanceSummary:
@@ -497,4 +586,36 @@ def summarize(trades: Iterable[TradeRow]) -> PerformanceSummary:
         gross_loss=gross_loss,
         net_pnl=cumulative,
         max_drawdown=max_drawdown,
+    )
+
+
+def summarize_execution(
+    slippage: Iterable[SlippageRow], trades: Iterable[TradeRow]
+) -> ExecutionQuality:
+    """滑りと MFE/MAE をまとめる。
+
+    Store を介さずバックテスト結果からも使えるよう、関数として切り出してある。
+    """
+    bps = [row.slippage_bp for row in slippage]
+    with_excursion = [t for t in trades if t.mfe is not None and t.mae is not None]
+    winner_maes = [t.mae for t in with_excursion if t.is_win and t.mae is not None]
+
+    # 取り切り率は「比の平均」ではなく合計どうしの比で出す。1件ずつの比を平均すると、
+    # 含み益がほぼ0のトレードで分母が潰れ、外れ値ひとつで全体が壊れる。
+    peaked = [t for t in with_excursion if t.mfe is not None and t.mfe > 0]
+    total_mfe = sum((t.mfe for t in peaked if t.mfe is not None), Decimal(0))
+    total_realized = sum((t.realized_pnl for t in peaked), Decimal(0))
+
+    def mean(values: list[Decimal]) -> Decimal:
+        return sum(values, Decimal(0)) / Decimal(len(values)) if values else Decimal(0)
+
+    return ExecutionQuality(
+        fills=len(bps),
+        average_slippage_bp=mean(bps),
+        worst_slippage_bp=max(bps) if bps else Decimal(0),
+        trades_with_excursion=len(with_excursion),
+        average_mfe=mean([t.mfe for t in with_excursion if t.mfe is not None]),
+        average_mae=mean([t.mae for t in with_excursion if t.mae is not None]),
+        average_capture_ratio=(total_realized / total_mfe if total_mfe > 0 else None),
+        winners_average_mae=mean(winner_maes),
     )

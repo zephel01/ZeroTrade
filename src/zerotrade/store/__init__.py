@@ -9,20 +9,25 @@ from __future__ import annotations
 from zerotrade.store.models import (
     EquityPoint,
     EventRow,
+    ExecutionQuality,
     PerformanceSummary,
     RejectionRow,
     SignalRow,
+    SlippageRow,
     TradeRow,
 )
-from zerotrade.store.sqlite import Store, summarize
+from zerotrade.store.sqlite import Store, summarize, summarize_execution
 
 __all__ = [
     "EquityPoint",
     "EventRow",
+    "ExecutionQuality",
     "PerformanceSummary",
     "RejectionRow",
     "SignalRow",
+    "SlippageRow",
     "Store",
     "TradeRow",
     "summarize",
+    "summarize_execution",
 ]

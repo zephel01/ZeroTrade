@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 
 from zerotrade.brokers.base import BaseBroker
 from zerotrade.control import KillSwitch
+from zerotrade.core.excursion import ExcursionTracker
 from zerotrade.core.notifier import Notifier, NullNotifier
 from zerotrade.core.orders import OrderManager
 from zerotrade.core.risk import MarketContext, RiskManager
@@ -103,6 +104,10 @@ class StrategyRunner:
         self._seen_trades: set[str] = set()
         self._last_day_key = risk.state.day_key
         self.stats = RunnerStats()
+
+        # ライブでは足の高値安値が取れないので、ループごとの気配値を標本にする。
+        # 取りこぼす方向にしか外れないので、判断材料としては安全側。
+        self._excursions = ExcursionTracker(settings.sizing.contract_size)
 
         # ATR の「平常時」基準に使う長期期間。設定の atr_period の5倍を既定とする。
         self._atr_period = int(settings.strategy.params.get("atr_period", 14))
@@ -232,10 +237,14 @@ class StrategyRunner:
         ticker = await self._feed.get_ticker(symbol)
         position = positions.get(symbol)
 
+        if position is not None:
+            # 決済されたときに MFE/MAE として残す。決済判定より前に測る。
+            self._excursions.observe_price(position, ticker.mid)
+
         # --- 保険としての強制決済 -------------------------------------------
         # ブローカー側のストップが機能していない場合の最後の砦。
         if position is not None and await self._force_exit_if_needed(
-            position, ticker.mid, balance, positions
+            position, ticker, balance, positions
         ):
             return
 
@@ -257,7 +266,7 @@ class StrategyRunner:
             return
 
         if signal.action is SignalAction.EXIT:
-            await self._handle_exit(signal, position, balance, positions)
+            await self._handle_exit(signal, position, ticker, balance, positions)
             return
 
         await self._handle_entry(
@@ -274,13 +283,17 @@ class StrategyRunner:
         self,
         signal: Signal,
         position: Position | None,
+        ticker: Ticker,
         balance: Balance,
         positions: dict[str, Position],
     ) -> None:
         if position is None:
             return
         result = await self._orders.close_position(
-            position, balance=balance, positions=positions.values()
+            position,
+            balance=balance,
+            positions=positions.values(),
+            reference_price=ticker.price_for(position.side.opposite),
         )
         if result.submitted:
             self.stats.exits += 1
@@ -314,7 +327,7 @@ class StrategyRunner:
     async def _force_exit_if_needed(
         self,
         position: Position,
-        price: Decimal,
+        ticker: Ticker,
         balance: Balance,
         positions: dict[str, Position],
     ) -> bool:
@@ -323,6 +336,7 @@ class StrategyRunner:
         Returns:
             決済を実行したか。
         """
+        price = ticker.mid
         breached: str | None = None
         if position.side is Side.BUY:
             if position.stop_loss is not None and price <= position.stop_loss:
@@ -342,7 +356,10 @@ class StrategyRunner:
         # 約定していれば送信されずに戻るので、その場合は何も起きていない。
         # 警告と通知は、実際に強制決済したときだけ出す。
         result = await self._orders.close_position(
-            position, balance=balance, positions=positions.values()
+            position,
+            balance=balance,
+            positions=positions.values(),
+            reference_price=ticker.price_for(position.side.opposite),
         )
         if not result.submitted:
             logger.debug(
@@ -411,6 +428,8 @@ class StrategyRunner:
             quantity=sizing.quantity,
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
+            # 発注を決めた時点の価格。実際の約定との差が滑りの実測値になる。
+            reference_price=entry_price,
             metadata={"strategy": signal.strategy, "reason": signal.reason},
         )
 
@@ -490,7 +509,7 @@ class StrategyRunner:
             self._seen_trades.add(key)
             self._risk.record_trade_closed(trade.symbol, trade.realized_pnl)
             if self._store is not None:
-                self._store.record_trade(trade)
+                self._store.record_trade(self._with_excursion(trade))
 
             if self._risk.is_halted:
                 self._record_event("halt", self._risk.summary())
@@ -552,6 +571,8 @@ class StrategyRunner:
             )
             self._risk.record_trade_closed(symbol, pnl)
             if self._store is not None:
+                ratio = closed / before.quantity if before.quantity > 0 else Decimal(1)
+                excursion = self._excursions.snapshot(symbol, ratio=ratio)
                 self._store.record_trade(
                     ClosedTrade(
                         symbol=symbol,
@@ -563,8 +584,12 @@ class StrategyRunner:
                         opened_at=before.opened_at,
                         trade_id=before.broker_position_id or symbol,
                         reason="inferred",
+                        mfe=None if excursion is None else excursion.favorable,
+                        mae=None if excursion is None else excursion.adverse,
                     )
                 )
+            if after is None:
+                self._excursions.forget(symbol)
             if self._risk.is_halted:
                 self._record_event("halt", self._risk.summary())
                 await self._notifier.send(
@@ -586,6 +611,20 @@ class StrategyRunner:
             self._risk.set_reference_equity(balance.equity)
 
     # ------------------------------------------------------------ 記録
+
+    def _with_excursion(self, trade: ClosedTrade) -> ClosedTrade:
+        """ブローカーが返したトレードに MFE/MAE を補う。
+
+        取引所は建玉中の含み損益の履歴を返さないので、こちらが
+        ループごとに観測していた値を貼る。既に入っていれば触らない。
+        """
+        if trade.mfe is not None or trade.mae is not None:
+            return trade
+        excursion = self._excursions.snapshot(trade.symbol)
+        if excursion is None:
+            return trade
+        self._excursions.forget(trade.symbol)
+        return replace(trade, mfe=excursion.favorable, mae=excursion.adverse)
 
     def _record_order(self, order: Order | None) -> None:
         if self._store is not None and order is not None:

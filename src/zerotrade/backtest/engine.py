@@ -273,6 +273,8 @@ async def run_backtest(
             closed_at=t.closed_at,
             reason=t.reason,
             strategy=strategy.name,
+            mfe=t.mfe,
+            mae=t.mae,
         )
         for t in await broker.get_closed_trades()
     ]

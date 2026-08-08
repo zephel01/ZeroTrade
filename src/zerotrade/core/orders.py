@@ -114,6 +114,11 @@ class OrderManager:
             )
             return SubmitResult(decision=decision, error=str(exc))
 
+        # 滑りの実測に使う想定価格。ブローカーが埋めていなければ
+        # 発注を決めた時点の価格をここで引き継ぐ。_track より前にやること。
+        if order.reference_price is None:
+            order.reference_price = request.reference_price
+
         self._track(order)
         self._risk.record_order_submitted(request)
         logger.info(
@@ -190,6 +195,7 @@ class OrderManager:
         *,
         balance: Balance,
         positions: Iterable[Position],
+        reference_price: Decimal | None = None,
     ) -> SubmitResult:
         """建玉を成行で決済する。``reduce_only`` なのでリスク検査は素通しになる。
 
@@ -218,6 +224,7 @@ class OrderManager:
             # 実際に残っている数量で出す。多すぎると余剰が新規建てになる。
             quantity=min(position.quantity, live.quantity),
             reduce_only=True,
+            reference_price=reference_price,
             metadata={"close_of": live.broker_position_id or live.symbol},
         )
         return await self.submit(request, balance=balance, positions=positions)

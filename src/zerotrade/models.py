@@ -251,6 +251,24 @@ class ClosedTrade:
     reason: str = ""
     """``stop_loss`` / ``take_profit`` / ``signal`` / ``manual`` など。"""
 
+    mfe: Decimal | None = None
+    """建玉中の最大含み益（口座通貨建て、0以上）。取得できなければ ``None``。"""
+
+    mae: Decimal | None = None
+    """建玉中の最大含み損（口座通貨建て、0以下）。取得できなければ ``None``。"""
+
+    @property
+    def capture_ratio(self) -> Decimal | None:
+        """含み益のピークのうち、実際に取れた割合。
+
+        1.0 に近いほど出口が良い。0.2 なら伸びた利益の8割を返してから
+        決済していることになる。MFE が 0 以下なら「取り逃がしようが
+        なかった」ので ``None`` を返す。
+        """
+        if self.mfe is None or self.mfe <= 0:
+            return None
+        return self.realized_pnl / self.mfe
+
 
 @dataclass(frozen=True, slots=True)
 class OrderRequest:
@@ -270,6 +288,13 @@ class OrderRequest:
     time_in_force: TimeInForce = TimeInForce.GTC
     reduce_only: bool = False
     """決済専用注文。新規リスクを増やさないためリスク検査の一部を免除する。"""
+
+    reference_price: Decimal | None = None
+    """発注を決めた時点で観測していた価格。
+
+    実際の約定価格との差が、そのまま滑りの実測値になる。
+    想定スプレッドが正しいかどうかは、この差を貯めないと分からない。
+    """
 
     client_order_id: str = field(default_factory=_new_client_id)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -303,6 +328,9 @@ class Order:
     reduce_only: bool = False
     """決済専用。対象の建玉が無い場合、新規建てになってはならない。"""
 
+    reference_price: Decimal | None = None
+    """発注を決めた時点で観測していた価格（:class:`OrderRequest` から引き継ぐ）。"""
+
     created_at: datetime = field(default_factory=utcnow)
     updated_at: datetime = field(default_factory=utcnow)
     reject_reason: str | None = None
@@ -315,6 +343,30 @@ class Order:
     @property
     def is_active(self) -> bool:
         return self.status.is_active
+
+    @property
+    def slippage(self) -> Decimal | None:
+        """想定価格からの滑り（価格の単位）。**正が不利側**。
+
+        買いは高く買わされた分、売りは安く売らされた分が正になる。
+        符号を方向で揃えておかないと、買いと売りを混ぜて平均した瞬間に
+        滑りが打ち消し合って「ほぼゼロ」に見えてしまう。
+        """
+        if self.average_price is None or self.reference_price is None:
+            return None
+        return (self.average_price - self.reference_price) * self.side.sign
+
+    @property
+    def slippage_bp(self) -> Decimal | None:
+        """滑りをベーシスポイント（1bp = 0.01%）で表したもの。
+
+        銘柄をまたいで比べられるようにするための正規化。優位性の大きさと
+        同じ単位で並べないと、コストが優位性を食い潰しているかが分からない。
+        """
+        slippage = self.slippage
+        if slippage is None or self.reference_price is None or self.reference_price <= 0:
+            return None
+        return slippage / self.reference_price * Decimal(10_000)
 
 
 @dataclass(frozen=True, slots=True)
